@@ -3,6 +3,7 @@ import asyncio
 import websockets
 import json
 import logging
+import os
 from datetime import datetime
 import random
 
@@ -202,9 +203,24 @@ async def handle_client(websocket, path):
 
 async def main():
     asyncio.create_task(game_server.game_loop())
-    logger.info("🚀 Starting WebSocket Game Server on ws://0.0.0.0:8080")
-    async with websockets.serve(handle_client, "0.0.0.0", 8080):
+    
+    # Render için PORT environment variable kullan
+    port = int(os.environ.get("PORT", 8080))
+    host = "0.0.0.0"
+    
+    logger.info(f"🚀 Starting WebSocket Game Server on ws://{host}:{port}")
+    
+    # Render için özel WebSocket ayarları
+    async with websockets.serve(
+        handle_client, 
+        host, 
+        port,
+        compression=None,  # Compression kapalı
+        ping_interval=20,  # Keep-alive ping
+        ping_timeout=10,
+        max_size=10 * 1024 * 1024  # 10MB max message size
+    ):
         await asyncio.Future()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main()
