@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Battle Arena - Multiplayer Game</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+</head>
+<body>
+<div class="main-menu" id="mainMenu">
+    <div class="menu-content">
+        <h1 class="game-title">BATTLE ARENA</h1>
+        <p class="subtitle">Multiplayer Combat Game</p>
+
+        <div class="menu-form">
+            <input type="text" id="playerName" placeholder="Enter your name" maxlength="20">
+            <button class="play-btn" id="playBtn">PLAY</button>
+        </div>
+
+        <div class="server-status">
+            <span class="status-indicator" id="serverStatus"></span>
+            <span>Server Status</span>
+        </div>
+    </div>
+</div>
+
+<div class="game-ui" id="gameUI" style="display: none;">
+    <!-- Top Bar -->
+    <div class="top-bar">
+        <div class="player-info">
+            <span class="player-name" id="playerNameDisplay">Player</span>
+            <span class="player-stats">
+                    K: <span id="kills">0</span> |
+                    D: <span id="deaths">0</span>
+                </span>
+        </div>
+
+        <div class="game-timer">
+            <span id="gameTime">00:00</span>
+        </div>
+
+        <div class="server-info">
+            <span>Ping: <span id="ping">0</span>ms</span>
+            <span>FPS: <span id="fps">0</span></span>
+        </div>
+    </div>
+
+    <!-- Game Canvas -->
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- Bottom UI -->
+    <div class="bottom-ui">
+        <div class="health-bar-container">
+            <div class="health-bar" id="healthBar"></div>
+            <span class="health-text" id="healthText">100/100</span>
+        </div>
+
+        <div class="ammo-display">
+            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M12 2L4 7v10c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-8-5z'/%3E%3C/svg%3E" alt="ammo">
+            <span id="ammo">∞</span>
+        </div>
+    </div>
+
+    <!-- Kill Feed -->
+    <div class="kill-feed" id="killFeed"></div>
+
+    <!-- Leaderboard -->
+    <div class="leaderboard" id="leaderboard">
+        <h3>LEADERBOARD</h3>
+        <div class="leaderboard-content" id="leaderboardContent"></div>
+    </div>
+
+    <!-- Chat -->
+    <div class="chat-container">
+        <div class="chat-messages" id="chatMessages"></div>
+        <input type="text" class="chat-input" id="chatInput" placeholder="Press Enter to chat...">
+    </div>
+</div>
+
+<script src="game.js"></script>
+</body>
+</html>
