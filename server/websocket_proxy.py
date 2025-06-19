@@ -274,7 +274,7 @@ async def health_check(request):
 async def serve_static(request):
     """Static dosyaları serve et"""
     filename = request.match_info['filename']
-    filepath = os.path.join('client', filename)
+    filepath = os.path.join('../client', filename)  # ../client/ yolunu kullan
     
     if not os.path.exists(filepath):
         return web.Response(text="File not found", status=404)
@@ -299,9 +299,9 @@ async def serve_static(request):
 async def index_handler(request):
     """Ana sayfa - Oyun client'ını serve et"""
     try:
-        # client/index.html dosyasını oku
-        if os.path.exists('client/index.html'):
-            with open('client/index.html', 'r', encoding='utf-8') as f:
+        # ../client/index.html dosyasını oku (server klasöründen çıkıp client'a git)
+        if os.path.exists('../client/index.html'):
+            with open('../client/index.html', 'r', encoding='utf-8') as f:
                 html = f.read()
             return web.Response(text=html, content_type='text/html')
         else:
