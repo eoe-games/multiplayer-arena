@@ -5,8 +5,9 @@ import os
 
 app = FastAPI()
 
-# Ana dizin: multiplayer-arena/
-BASE_DIR = Path(__file__).resolve().parents[1]
+# websocket_server.py bulunduğu yer: server/server/
+# client klasörü nerede: ../../client/
+BASE_DIR = Path(__file__).resolve().parents[2]
 app.mount("/", StaticFiles(directory=BASE_DIR / "client", html=True), name="client")
 
 clients = []
@@ -25,4 +26,4 @@ async def websocket_endpoint(websocket: WebSocket):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("server.websocket_server:app", host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
+    uvicorn.run("server.server.websocket_server:app", host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
