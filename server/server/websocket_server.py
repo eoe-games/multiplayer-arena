@@ -1,13 +1,15 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 import os
 
 app = FastAPI()
 
-# Serve static frontend files from client/
-app.mount("/", StaticFiles(directory="client", html=True), name="client")
+# Gerçek dizin yolu
+BASE_DIR = Path(__file__).resolve().parent.parent
+app.mount("/", StaticFiles(directory=BASE_DIR / "client", html=True), name="client")
 
-# WebSocket connections
+# WebSocket bağlantıları
 clients = []
 
 @app.websocket("/ws")
@@ -22,7 +24,6 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         clients.remove(websocket)
 
-# ✅ Main entry point
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
+    uvicorn.run("server.websocket_server:app", host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
