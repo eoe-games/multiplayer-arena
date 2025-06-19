@@ -165,8 +165,9 @@ class GameClient {
     connect() {
         console.log('🔗 Connecting to server...');
         const serverURL = window.location.hostname === 'localhost'
-    ? 'ws://localhost:8080/ws'
-    : 'wss://multiplayer-arena.onrender.com/ws';
+    ? 'ws://localhost:8080'
+    : 'wss://multiplayer-arena.onrender.com';
+        
 
         
 
