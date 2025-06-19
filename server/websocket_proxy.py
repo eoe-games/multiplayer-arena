@@ -271,23 +271,64 @@ async def health_check(request):
     """Health check endpoint"""
     return web.Response(text="OK", status=200)
 
+async def serve_static(request):
+    """Static dosyaları serve et"""
+    filename = request.match_info['filename']
+    filepath = os.path.join('client', filename)
+    
+    if not os.path.exists(filepath):
+        return web.Response(text="File not found", status=404)
+    
+    # MIME type belirleme
+    content_type = 'text/plain'
+    if filename.endswith('.html'):
+        content_type = 'text/html'
+    elif filename.endswith('.css'):
+        content_type = 'text/css'
+    elif filename.endswith('.js'):
+        content_type = 'application/javascript'
+    
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            content = f.read()
+        return web.Response(text=content, content_type=content_type)
+    except Exception as e:
+        logger.error(f"Error serving {filename}: {e}")
+        return web.Response(text="Error loading file", status=500)
+
 async def index_handler(request):
-    """Ana sayfa"""
-    html = """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Game Server</title>
-    </head>
-    <body>
-        <h1>🎮 WebSocket Game Server</h1>
-        <p>Server is running and ready for connections!</p>
-        <p>Connect with WebSocket to: <code>ws://this-domain/ws</code></p>
-        <p>Health check: <a href="/health">/health</a></p>
-    </body>
-    </html>
-    """
-    return web.Response(text=html, content_type='text/html')
+    """Ana sayfa - Oyun client'ını serve et"""
+    try:
+        # client/index.html dosyasını oku
+        if os.path.exists('client/index.html'):
+            with open('client/index.html', 'r', encoding='utf-8') as f:
+                html = f.read()
+            return web.Response(text=html, content_type='text/html')
+        else:
+            # Fallback HTML
+            html = """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Game Server</title>
+                <style>
+                    body { font-family: Arial; background: #222; color: white; text-align: center; padding: 50px; }
+                    .error { color: #ff6666; }
+                </style>
+            </head>
+            <body>
+                <h1>🎮 WebSocket Game Server</h1>
+                <p class="error">Client files not found!</p>
+                <p>Server is running at: <code>ws://this-domain/ws</code></p>
+                <p>Please upload client files to serve the game.</p>
+                <p>Health check: <a href="/health">/health</a></p>
+            </body>
+            </html>
+            """
+            return web.Response(text=html, content_type='text/html')
+    except Exception as e:
+        logger.error(f"Error serving index: {e}")
+        return web.Response(text="Error loading game", status=500)
 
 async def create_app():
     """Aiohttp uygulamasını oluştur"""
@@ -308,6 +349,7 @@ async def create_app():
     app.router.add_get('/health', health_check)
     app.router.add_get('/healthz', health_check)  # Kubernetes style
     app.router.add_get('/ws', websocket_handler)
+    app.router.add_get('/{filename}', serve_static)  # Static dosyalar için
     
     # CORS'u tüm route'lara ekle
     for route in list(app.router.routes()):
