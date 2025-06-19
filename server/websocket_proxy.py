@@ -6,6 +6,7 @@ import logging
 import os
 from datetime import datetime
 import random
+import math
 import sys
 from aiohttp import web, WSMsgType
 import aiohttp_cors
@@ -53,8 +54,8 @@ class GameServer:
             if pdata.get("isBot"):
                 # Daha akıllı bot hareketi
                 time_factor = datetime.now().timestamp() * 0.5
-                pdata['x'] += random.randint(-3, 3) + 2 * random.sin(time_factor + pdata['id'])
-                pdata['y'] += random.randint(-3, 3) + 2 * random.cos(time_factor + pdata['id'] * 0.7)
+                pdata['x'] += random.randint(-3, 3) + 2 * math.sin(time_factor + pdata['id'])
+                pdata['y'] += random.randint(-3, 3) + 2 * math.cos(time_factor + pdata['id'] * 0.7)
                 pdata['x'] = max(50, min(1950, pdata['x']))
                 pdata['y'] = max(50, min(1150, pdata['y']))
 
