@@ -5,11 +5,10 @@ import os
 
 app = FastAPI()
 
-# Gerçek dizin yolu
-BASE_DIR = Path(__file__).resolve().parent.parent
+# Ana dizin: multiplayer-arena/
+BASE_DIR = Path(__file__).resolve().parents[1]
 app.mount("/", StaticFiles(directory=BASE_DIR / "client", html=True), name="client")
 
-# WebSocket bağlantıları
 clients = []
 
 @app.websocket("/ws")
