@@ -7,24 +7,22 @@ import os
 from datetime import datetime
 import random
 import sys
+from aiohttp import web, WSMsgType
+import aiohttp_cors
 
-# Logging ayarları - sadece önemli hataları göster
+# Logging ayarları
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# WebSocket kütüphanesi için ayrı logger - hataları sustur
-websockets_logger = logging.getLogger('websockets')
-websockets_logger.setLevel(logging.ERROR)
-
 class GameServer:
     def __init__(self):
         self.clients = {}  # client_id -> websocket
         self.players = {}  # player_id -> player_data
         self.next_client_id = 1
-        self.next_bot_id = 10000
+        self.next_bot_id = -1000  # Negative IDs for bots
         self.game_state = {
             "entities": [],
             "tick": 0,
@@ -35,18 +33,18 @@ class GameServer:
     def spawn_bots(self, count):
         for _ in range(count):
             bot_id = self.next_bot_id
-            self.next_bot_id += 1
+            self.next_bot_id -= 1
             self.players[bot_id] = {
                 'id': bot_id,
                 'client_id': None,
-                'name': f'Bot{bot_id}',
+                'name': f'Bot{abs(bot_id)}',
                 'x': random.randint(200, 1800),
                 'y': random.randint(200, 1000),
                 'vx': 0,
                 'vy': 0,
                 'rotation': 0,
                 'health': 100,
-                'score': 0,
+                'score': random.randint(0, 5),
                 'isBot': True
             }
 
@@ -54,8 +52,9 @@ class GameServer:
         for pdata in self.players.values():
             if pdata.get("isBot"):
                 # Daha akıllı bot hareketi
-                pdata['x'] += random.randint(-5, 5)
-                pdata['y'] += random.randint(-5, 5)
+                time_factor = datetime.now().timestamp() * 0.5
+                pdata['x'] += random.randint(-3, 3) + 2 * random.sin(time_factor + pdata['id'])
+                pdata['y'] += random.randint(-3, 3) + 2 * random.cos(time_factor + pdata['id'] * 0.7)
                 pdata['x'] = max(50, min(1950, pdata['x']))
                 pdata['y'] = max(50, min(1150, pdata['y']))
 
@@ -64,10 +63,8 @@ class GameServer:
         self.next_client_id += 1
         self.clients[client_id] = websocket
         
-        # Client bilgilerini güvenli şekilde al
         try:
-            remote_address = websocket.remote_address
-            logger.info(f"✅ Client {client_id} connected from {remote_address}")
+            logger.info(f"✅ Client {client_id} connected")
         except:
             logger.info(f"✅ Client {client_id} connected")
             
@@ -95,7 +92,7 @@ class GameServer:
             for client_id, ws in list(self.clients.items()):
                 if client_id != exclude_client:
                     try:
-                        await ws.send(json.dumps(message))
+                        await ws.send_str(json.dumps(message))
                     except:
                         disconnected.append(client_id)
                         
@@ -103,9 +100,8 @@ class GameServer:
             for client_id in disconnected:
                 await self.unregister_client(client_id)
 
-    async def handle_message(self, client_id, websocket, message):
+    async def handle_message(self, client_id, data):
         try:
-            data = json.loads(message)
             msg_type = data.get('type')
             
             if msg_type == 'PLAYER_JOIN':
@@ -117,8 +113,6 @@ class GameServer:
             elif msg_type == 'CHAT_MESSAGE':
                 await self.handle_chat_message(data)
                 
-        except json.JSONDecodeError:
-            logger.warning(f"Invalid JSON from client {client_id}")
         except Exception as e:
             logger.error(f"Error handling message from client {client_id}: {e}")
 
@@ -160,7 +154,7 @@ class GameServer:
         }
         
         try:
-            await self.clients[client_id].send(json.dumps(world_state))
+            await self.clients[client_id].send_str(json.dumps(world_state))
             logger.info(f"🎮 {player_name} (ID: {player_id}) joined the game")
         except Exception as e:
             logger.error(f"Failed to send world state to client {client_id}: {e}")
@@ -177,7 +171,7 @@ class GameServer:
                 'rotation': data.get('rotation', 0)
             })
             
-            # Diğer oyunculara bildir
+            # Diğer oyunculara bildir (rate limiting ile)
             await self.broadcast({
                 'type': 'PLAYER_UPDATE',
                 'playerId': player_id,
@@ -225,14 +219,14 @@ class GameServer:
         """Ana oyun döngüsü - dünya durumunu periyodik olarak güncelle"""
         while True:
             try:
-                await asyncio.sleep(1/30)  # 30 FPS
+                await asyncio.sleep(1/20)  # 20 FPS for server
                 self.game_state['tick'] += 1
                 
                 # Botları güncelle
                 self.update_bots()
                 
-                # Her saniye dünya durumunu gönder
-                if self.game_state['tick'] % 30 == 0:
+                # Her 2 saniyede dünya durumunu gönder
+                if self.game_state['tick'] % 40 == 0:
                     world_state = {
                         'type': 'WORLD_STATE',
                         'players': list(self.players.values()),
@@ -243,97 +237,82 @@ class GameServer:
                     
             except Exception as e:
                 logger.error(f"Error in game loop: {e}")
-                await asyncio.sleep(1)  # Hata durumunda biraz bekle
+                await asyncio.sleep(1)
 
 # Global server instance
 game_server = GameServer()
 
-async def handle_http_request(path, headers):
-    """Basit HTTP isteklerini handle et (health check, vs.)"""
-    if path == "/":
-        return (
-            "HTTP/1.1 200 OK\r\n"
-            "Content-Type: text/plain\r\n"
-            "Connection: close\r\n"
-            "\r\n"
-            "WebSocket Game Server is running!\r\n"
-            "Connect with a WebSocket client to play."
-        )
-    elif path == "/health" or path == "/healthz":
-        return (
-            "HTTP/1.1 200 OK\r\n"
-            "Content-Type: text/plain\r\n"
-            "Connection: close\r\n"
-            "\r\n"
-            "OK"
-        )
-    else:
-        return (
-            "HTTP/1.1 404 Not Found\r\n"
-            "Content-Type: text/plain\r\n"
-            "Connection: close\r\n"
-            "\r\n"
-            "Not Found"
-        )
-
-async def handle_client(websocket, path):
-    """WebSocket ve HTTP isteklerini handle et"""
+async def websocket_handler(request):
+    """WebSocket bağlantılarını handle et"""
+    ws = web.WebSocketResponse()
+    await ws.prepare(request)
+    
+    client_id = await game_server.register_client(ws)
+    
     try:
-        # İlk mesajı bekle - HTTP mi WebSocket mi?
-        try:
-            # Kısa timeout ile ilk veriyi kontrol et
-            first_data = await asyncio.wait_for(websocket.recv(), timeout=0.1)
-            
-            # HTTP isteği mi kontrol et
-            if isinstance(first_data, bytes):
-                first_data = first_data.decode('utf-8', errors='ignore')
-                
-            if first_data.startswith(('GET', 'HEAD', 'POST')):
-                # HTTP isteği - basit response gönder
-                lines = first_data.split('\r\n')
-                request_line = lines[0].split(' ')
-                
-                if len(request_line) >= 2:
-                    method = request_line[0]
-                    req_path = request_line[1]
-                    
-                    # Headers'ı parse et
-                    headers = {}
-                    for line in lines[1:]:
-                        if ':' in line:
-                            key, value = line.split(':', 1)
-                            headers[key.strip().lower()] = value.strip()
-                    
-                    response = await handle_http_request(req_path, headers)
-                    await websocket.send(response.encode())
-                    await websocket.close()
-                    return
-                    
-        except asyncio.TimeoutError:
-            # Timeout - normal WebSocket bağlantısı olarak devam et
-            pass
-            
-        # WebSocket bağlantısı olarak devam et
-        client_id = await game_server.register_client(websocket)
-        
-        # WebSocket mesajlarını dinle
-        async for message in websocket:
-            await game_server.handle_message(client_id, websocket, message)
-            
-    except websockets.exceptions.InvalidMessage:
-        # Geçersiz WebSocket mesajı - sessizce kapat
-        pass
-    except websockets.exceptions.ConnectionClosed:
-        # Bağlantı kapandı - normal durum
-        pass
+        async for msg in ws:
+            if msg.type == WSMsgType.TEXT:
+                try:
+                    data = json.loads(msg.data)
+                    await game_server.handle_message(client_id, data)
+                except json.JSONDecodeError:
+                    logger.warning(f"Invalid JSON from client {client_id}")
+            elif msg.type == WSMsgType.ERROR:
+                logger.error(f'WebSocket error: {ws.exception()}')
     except Exception as e:
-        # Beklenmeyen hata
-        if "client_id" in locals():
-            logger.error(f"Unexpected error with client {client_id}: {e}")
+        logger.error(f"Error in websocket handler: {e}")
     finally:
-        # Client varsa temizle
-        if "client_id" in locals():
-            await game_server.unregister_client(client_id)
+        await game_server.unregister_client(client_id)
+    
+    return ws
+
+async def health_check(request):
+    """Health check endpoint"""
+    return web.Response(text="OK", status=200)
+
+async def index_handler(request):
+    """Ana sayfa"""
+    html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Game Server</title>
+    </head>
+    <body>
+        <h1>🎮 WebSocket Game Server</h1>
+        <p>Server is running and ready for connections!</p>
+        <p>Connect with WebSocket to: <code>ws://this-domain/ws</code></p>
+        <p>Health check: <a href="/health">/health</a></p>
+    </body>
+    </html>
+    """
+    return web.Response(text=html, content_type='text/html')
+
+async def create_app():
+    """Aiohttp uygulamasını oluştur"""
+    app = web.Application()
+    
+    # CORS ayarları
+    cors = aiohttp_cors.setup(app, defaults={
+        "*": aiohttp_cors.ResourceOptions(
+            allow_credentials=True,
+            expose_headers="*",
+            allow_headers="*",
+            allow_methods="*"
+        )
+    })
+    
+    # Routes
+    app.router.add_get('/', index_handler)
+    app.router.add_get('/health', health_check)
+    app.router.add_get('/healthz', health_check)  # Kubernetes style
+    app.router.add_get('/ws', websocket_handler)
+    
+    # CORS'u tüm route'lara ekle
+    for route in list(app.router.routes()):
+        cors.add(route)
+    
+    return app
 
 async def main():
     """Ana server başlatıcı"""
@@ -344,25 +323,26 @@ async def main():
     port = int(os.environ.get("PORT", 8080))
     host = "0.0.0.0"
     
-    logger.info(f"🚀 Starting WebSocket Game Server on ws://{host}:{port}")
-    logger.info(f"🌐 HTTP health check available at http://{host}:{port}/health")
+    logger.info(f"🚀 Starting Game Server on http://{host}:{port}")
+    logger.info(f"🌐 WebSocket endpoint: ws://{host}:{port}/ws")
+    logger.info(f"💚 Health check: http://{host}:{port}/health")
     
     try:
-        # WebSocket server'ı başlat - sadece desteklenen parametrelerle
-        async with websockets.serve(
-            handle_client, 
-            host, 
-            port,
-            compression=None,  # Compression kapalı (performans için)
-            ping_interval=20,  # Keep-alive ping (20 saniye)
-            ping_timeout=10,   # Ping timeout (10 saniye)
-            max_size=10 * 1024 * 1024  # Max mesaj boyutu (10MB)
-        ):
-            logger.info("✅ Server is ready and accepting connections!")
-            
-            # Sonsuza kadar çalış
-            await asyncio.Future()
-            
+        # Aiohttp app oluştur
+        app = await create_app()
+        
+        # Server'ı başlat
+        runner = web.AppRunner(app)
+        await runner.setup()
+        
+        site = web.TCPSite(runner, host, port)
+        await site.start()
+        
+        logger.info("✅ Server is ready and accepting connections!")
+        
+        # Sonsuza kadar çalış
+        await asyncio.Future()
+        
     except Exception as e:
         logger.error(f"Failed to start server: {e}")
         game_loop_task.cancel()
