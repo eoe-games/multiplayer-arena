@@ -348,7 +348,7 @@ async def main():
     logger.info(f"🌐 HTTP health check available at http://{host}:{port}/health")
     
     try:
-        # WebSocket server'ı başlat
+        # WebSocket server'ı başlat - sadece desteklenen parametrelerle
         async with websockets.serve(
             handle_client, 
             host, 
@@ -356,10 +356,7 @@ async def main():
             compression=None,  # Compression kapalı (performans için)
             ping_interval=20,  # Keep-alive ping (20 saniye)
             ping_timeout=10,   # Ping timeout (10 saniye)
-            max_size=10 * 1024 * 1024,  # Max mesaj boyutu (10MB)
-            max_queue=32,      # Max kuyruk boyutu
-            read_limit=2 ** 16,  # Read buffer limiti
-            write_limit=2 ** 16  # Write buffer limiti
+            max_size=10 * 1024 * 1024  # Max mesaj boyutu (10MB)
         ):
             logger.info("✅ Server is ready and accepting connections!")
             
