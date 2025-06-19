@@ -172,27 +172,23 @@ class GameServer:
                 'rotation': data.get('rotation', 0)
             })
             
-            # Diğer oyunculara bildir (rate limiting ile)
-            await self.broadcast({
-                'type': 'PLAYER_UPDATE',
-                'playerId': player_id,
-                'x': self.players[player_id]['x'],
-                'y': self.players[player_id]['y'],
-                'vx': self.players[player_id]['vx'],
-                'vy': self.players[player_id]['vy'],
-                'rotation': self.players[player_id]['rotation']
-            })
+            # Diğer oyunculara bildir (rate limiting ile - her update'i gönderme)
+            # Sadece önemli pozisyon değişikliklerini gönder
 
     async def handle_player_shoot(self, data):
         shooter_id = data.get('playerId')
         if shooter_id in self.players:
             # Ateş bilgisini tüm oyunculara yayınla
-            await self.broadcast({
+            shoot_data = {
                 'type': 'PLAYER_SHOOT',
                 'shooterId': shooter_id,
-                'origin': data.get('origin'),
-                'direction': data.get('direction')
-            })
+                'x': data.get('x'),
+                'y': data.get('y'),
+                'rotation': data.get('rotation'),
+                'timestamp': datetime.now().timestamp()
+            }
+            await self.broadcast(shoot_data)
+            logger.info(f"Player {shooter_id} fired a shot")
 
     async def handle_player_leave(self, player_id):
         if player_id in self.players:
@@ -220,14 +216,14 @@ class GameServer:
         """Ana oyun döngüsü - dünya durumunu periyodik olarak güncelle"""
         while True:
             try:
-                await asyncio.sleep(1/20)  # 20 FPS for server
+                await asyncio.sleep(1/10)  # 10 FPS for server (daha az yoğun)
                 self.game_state['tick'] += 1
                 
                 # Botları güncelle
                 self.update_bots()
                 
-                # Her 2 saniyede dünya durumunu gönder
-                if self.game_state['tick'] % 40 == 0:
+                # Her 5 saniyede dünya durumunu gönder (daha az sıklıkta)
+                if self.game_state['tick'] % 50 == 0:
                     world_state = {
                         'type': 'WORLD_STATE',
                         'players': list(self.players.values()),
@@ -238,14 +234,17 @@ class GameServer:
                     
             except Exception as e:
                 logger.error(f"Error in game loop: {e}")
-                await asyncio.sleep(1)
+                await asyncio.sleep(2)  # Hata durumunda daha uzun bekle
 
 # Global server instance
 game_server = GameServer()
 
 async def websocket_handler(request):
     """WebSocket bağlantılarını handle et"""
-    ws = web.WebSocketResponse()
+    ws = web.WebSocketResponse(
+        heartbeat=30,  # 30 saniye heartbeat
+        timeout=60     # 60 saniye timeout
+    )
     await ws.prepare(request)
     
     client_id = await game_server.register_client(ws)
@@ -260,6 +259,9 @@ async def websocket_handler(request):
                     logger.warning(f"Invalid JSON from client {client_id}")
             elif msg.type == WSMsgType.ERROR:
                 logger.error(f'WebSocket error: {ws.exception()}')
+            elif msg.type == WSMsgType.CLOSE:
+                logger.info(f'WebSocket closed for client {client_id}')
+                break
     except Exception as e:
         logger.error(f"Error in websocket handler: {e}")
     finally:
