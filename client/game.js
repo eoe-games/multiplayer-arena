@@ -162,78 +162,90 @@ class GameClient {
 
     // game.js'de connect() fonksiyonunu bulun ve şöyle değiştirin:
 
-    connect() {
-        console.log('🔗 Connecting to server...');
-        const serverURL = window.location.hostname === 'localhost'
-    ? 'ws://localhost:8080'
-    : 'wss://multiplayer-arena.onrender.com';
-        
-
-        
-
-        try {
-            this.ws = new WebSocket(serverURL);
-
-            this.ws.onopen = () => {
-                console.log('✅ WebSocket connected!');
-                this.connected = true;
-                this.gameState = 'playing';
-                this.localPlayerId = Math.floor(Math.random() * 10000);
-
-                this.sendToServer({
-                    type: 'PLAYER_JOIN',
-                    playerId: this.localPlayerId,
-                    name: this.playerName
-                });
-
-                const player = {
-                    id: this.localPlayerId,
-                    name: this.playerName,
-                    x: Math.random() * 1600 + 100,
-                    y: Math.random() * 800 + 100,
-                    vx: 0,
-                    vy: 0,
-                    rotation: 0,
-                    health: 100,
-                    maxHealth: 100,
-                    radius: 20,
-                    color: this.getRandomColor(),
-                    score: 0
-                };
-
-                this.players.set(this.localPlayerId, player);
-                this.addChatMessage('System', 'Connected to server!', '#00ff88');
-            };
-
-            this.ws.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    this.handleServerMessage(data);
-                } catch (e) {
-                    console.error('Failed to parse server message:', e);
-                }
-            };
-
-            this.ws.onerror = (error) => {
-                console.error('❌ WebSocket error:', error);
-                this.addChatMessage('System', 'Connection error!', '#ff0000');
-                // 🔥 Otomatik offline moda geç
-                this.startSimulationMode();
-            };
-
-            this.ws.onclose = () => {
-                console.log('📴 WebSocket disconnected');
-                this.connected = false;
-                this.addChatMessage('System', 'Disconnected from server!', '#ff0000');
-                // 🔥 Otomatik offline moda geç
-                this.startSimulationMode();
-            };
-
-        } catch (error) {
-            console.error('Failed to create WebSocket:', error);
-            this.startSimulationMode();
-        }
+// connect() fonksiyonunu bulun ve şöyle değiştirin:
+connect() {
+    console.log('🔗 Connecting to server...');
+    
+    // Render URL'ini otomatik algıla
+    let serverURL;
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        serverURL = 'ws://localhost:8080/ws';
+    } else {
+        // Render'da HTTPS kullanıldığı için WSS kullan
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        serverURL = `${protocol}//${window.location.host}/ws`;
     }
+    
+    console.log('🔗 Connecting to:', serverURL);
+
+    try {
+        this.ws = new WebSocket(serverURL);
+
+        this.ws.onopen = () => {
+            console.log('✅ WebSocket connected!');
+            this.connected = true;
+            this.gameState = 'playing';
+            this.localPlayerId = Math.floor(Math.random() * 10000);
+
+            this.sendToServer({
+                type: 'PLAYER_JOIN',
+                playerId: this.localPlayerId,
+                name: this.playerName
+            });
+
+            const player = {
+                id: this.localPlayerId,
+                name: this.playerName,
+                x: Math.random() * 1600 + 100,
+                y: Math.random() * 800 + 100,
+                vx: 0,
+                vy: 0,
+                rotation: 0,
+                health: 100,
+                maxHealth: 100,
+                radius: 20,
+                color: this.getRandomColor(),
+                score: 0
+            };
+
+            this.players.set(this.localPlayerId, player);
+            this.addChatMessage('System', 'Connected to server!', '#00ff88');
+        };
+
+        this.ws.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                this.handleServerMessage(data);
+            } catch (e) {
+                console.error('Failed to parse server message:', e);
+            }
+        };
+
+        this.ws.onerror = (error) => {
+            console.error('❌ WebSocket error:', error);
+            this.addChatMessage('System', 'Connection error! Switching to offline mode...', '#ff0000');
+            // 🔥 Otomatik offline moda geç
+            setTimeout(() => {
+                this.startSimulationMode();
+            }, 1000);
+        };
+
+        this.ws.onclose = (event) => {
+            console.log('📴 WebSocket disconnected:', event.code, event.reason);
+            this.connected = false;
+            this.addChatMessage('System', 'Disconnected from server! Switching to offline mode...', '#ff0000');
+            // 🔥 Otomatik offline moda geç
+            setTimeout(() => {
+                this.startSimulationMode();
+            }, 1000);
+        };
+
+    } catch (error) {
+        console.error('Failed to create WebSocket:', error);
+        this.addChatMessage('System', 'Cannot connect to server! Running in offline mode...', '#ffaa00');
+        this.startSimulationMode();
+    }
+}
 
 
 
