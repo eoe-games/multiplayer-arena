@@ -21,3 +21,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 await client.send_text(data)
     except WebSocketDisconnect:
         clients.remove(websocket)
+
+# ✅ Main entry point
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
