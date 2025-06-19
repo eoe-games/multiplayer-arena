@@ -5,10 +5,17 @@ import os
 
 app = FastAPI()
 
-# websocket_server.py bulunduğu yer: server/server/
-# client klasörü nerede: ../../client/
-BASE_DIR = Path(__file__).resolve().parents[2]
-app.mount("/", StaticFiles(directory=BASE_DIR / "client", html=True), name="client")
+# websocket_server.py dosyası: server/websocket_server.py
+# client klasörü: proje kökünde => multiplayer-arena/client
+
+BASE_DIR = Path(__file__).resolve().parent.parent  # == multiplayer-arena/
+CLIENT_DIR = BASE_DIR / "client"
+
+# Mount client only if it exists
+if CLIENT_DIR.exists():
+    app.mount("/", StaticFiles(directory=CLIENT_DIR, html=True), name="client")
+else:
+    print(f"WARNING: 'client' directory not found at {CLIENT_DIR}")
 
 clients = []
 
