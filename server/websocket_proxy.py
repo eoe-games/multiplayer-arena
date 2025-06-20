@@ -32,71 +32,46 @@ class GameServer:
         self.spawn_bots(3)  # başlangıçta 3 bot spawn
 
     def spawn_bots(self, count):
-        for i in range(count):
+        for _ in range(count):
             bot_id = self.next_bot_id
             self.next_bot_id -= 1
-            
-            # Botları farklı başlangıç pozisyonlarına yerleştir
-            angle = (math.pi * 2 * i) / count
-            spawn_radius = 400
-            center_x = 1000
-            center_y = 600
-            
             self.players[bot_id] = {
                 'id': bot_id,
                 'client_id': None,
                 'name': f'Bot{abs(bot_id)}',
-                'x': center_x + math.cos(angle) * spawn_radius,
-                'y': center_y + math.sin(angle) * spawn_radius,
+                'x': random.randint(200, 1800),
+                'y': random.randint(200, 1000),
                 'vx': 0,
                 'vy': 0,
                 'rotation': 0,
                 'health': 100,
                 'score': random.randint(0, 5),
                 'isBot': True,
-                'lastUpdate': datetime.now().timestamp(),
-                'lastShot': 0  # Ateş etme için timer
+                'lastUpdate': datetime.now().timestamp()
             }
 
     def update_bots(self):
         for pdata in self.players.values():
             if pdata.get("isBot"):
-                # Daha yavaş ve düzgün bot hareketi
-                time_factor = datetime.now().timestamp() * 0.001  # Çok daha yavaş
-                bot_id_factor = abs(pdata['id']) * 0.0001  # Bot ID'sine göre farklı hızlar
-                
-                # Hedef pozisyon belirle (daire çizme)
-                center_x = 1000
-                center_y = 600
-                radius = 300 + (abs(pdata['id']) % 200)  # Farklı yarıçaplar
-                
-                angle = time_factor + bot_id_factor * math.pi * 2
-                target_x = center_x + math.cos(angle) * radius
-                target_y = center_y + math.sin(angle) * radius
-                
-                # Mevcut pozisyondan hedefe doğru yavaşça hareket et
-                dx = target_x - pdata['x']
-                dy = target_y - pdata['y']
-                
-                # Hızı sınırla
-                speed = 0.1
-                pdata['x'] += dx * speed
-                pdata['y'] += dy * speed
-                
-                # Dünya sınırları
+                # Eski bot hareketi - daha dinamik ve eğlenceli
+                time_factor = datetime.now().timestamp() * 0.5
+                pdata['x'] += random.randint(-3, 3) + 2 * math.sin(time_factor + pdata['id'])
+                pdata['y'] += random.randint(-3, 3) + 2 * math.cos(time_factor + pdata['id'] * 0.7)
                 pdata['x'] = max(50, min(1950, pdata['x']))
                 pdata['y'] = max(50, min(1150, pdata['y']))
                 
-                # Velocity hesapla (görsel için)
-                pdata['vx'] = dx * speed * 10
-                pdata['vy'] = dy * speed * 10
+                # Velocity hesapla
+                pdata['vx'] = random.randint(-50, 50)
+                pdata['vy'] = random.randint(-50, 50)
                 
-                # Rotasyonu güncelle
-                if abs(dx) > 0.1 or abs(dy) > 0.1:
-                    pdata['rotation'] = math.atan2(dy, dx)
+                # Rastgele rotasyon
+                pdata['rotation'] = math.atan2(pdata['vy'], pdata['vx'])
                 
-                # Her 10 update'de bir pozisyon gönder (performans için)
-                if self.game_state['tick'] % 10 == 0:
+                # Botlar için de lastUpdate güncelle ki timeout olmasınlar
+                pdata['lastUpdate'] = datetime.now().timestamp()
+                
+                # Her 5 tick'de bir pozisyon gönder
+                if self.game_state['tick'] % 5 == 0:
                     asyncio.create_task(self.broadcast({
                         'type': 'PLAYER_UPDATE',
                         'playerId': pdata['id'],
@@ -159,6 +134,11 @@ class GameServer:
                 await self.handle_chat_message(data)
             elif msg_type == 'PLAYER_HIT':
                 await self.handle_player_hit(data)
+            elif msg_type == 'HEARTBEAT':
+                # Heartbeat mesajı - sadece lastUpdate'i güncelle
+                player_id = data.get('playerId')
+                if player_id in self.players:
+                    self.players[player_id]['lastUpdate'] = datetime.now().timestamp()
                 
         except Exception as e:
             logger.error(f"Error handling message from client {client_id}: {e}")
