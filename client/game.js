@@ -208,6 +208,16 @@ class GameClient {
 
                 this.players.set(this.localPlayerId, player);
                 this.addChatMessage('System', 'Connected to server!', '#00ff88');
+                
+                // Heartbeat başlat - her 5 saniyede bir "canlıyım" mesajı gönder
+                this.heartbeatInterval = setInterval(() => {
+                    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                        this.sendToServer({
+                            type: 'HEARTBEAT',
+                            playerId: this.localPlayerId
+                        });
+                    }
+                }, 5000);
             };
 
             this.ws.onmessage = (event) => {
@@ -222,6 +232,7 @@ class GameClient {
             this.ws.onerror = (error) => {
                 console.error('❌ WebSocket error:', error);
                 this.addChatMessage('System', 'Connection error! Switching to offline mode...', '#ff0000');
+                if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
                 setTimeout(() => {
                     this.startSimulationMode();
                 }, 1000);
@@ -231,6 +242,7 @@ class GameClient {
                 console.log('📴 WebSocket disconnected:', event.code, event.reason);
                 this.connected = false;
                 this.addChatMessage('System', 'Disconnected from server! Switching to offline mode...', '#ff0000');
+                if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
                 setTimeout(() => {
                     this.startSimulationMode();
                 }, 1000);
