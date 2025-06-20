@@ -32,22 +32,30 @@ class GameServer:
         self.spawn_bots(3)  # başlangıçta 3 bot spawn
 
     def spawn_bots(self, count):
-        for _ in range(count):
+        for i in range(count):
             bot_id = self.next_bot_id
             self.next_bot_id -= 1
+            
+            # Botları farklı başlangıç pozisyonlarına yerleştir
+            angle = (math.pi * 2 * i) / count
+            spawn_radius = 400
+            center_x = 1000
+            center_y = 600
+            
             self.players[bot_id] = {
                 'id': bot_id,
                 'client_id': None,
                 'name': f'Bot{abs(bot_id)}',
-                'x': random.randint(200, 1800),
-                'y': random.randint(200, 1000),
+                'x': center_x + math.cos(angle) * spawn_radius,
+                'y': center_y + math.sin(angle) * spawn_radius,
                 'vx': 0,
                 'vy': 0,
                 'rotation': 0,
                 'health': 100,
                 'score': random.randint(0, 5),
                 'isBot': True,
-                'lastUpdate': datetime.now().timestamp()
+                'lastUpdate': datetime.now().timestamp(),
+                'lastShot': 0  # Ateş etme için timer
             }
 
     def update_bots(self):
