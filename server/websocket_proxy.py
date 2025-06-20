@@ -46,7 +46,8 @@ class GameServer:
                 'rotation': 0,
                 'health': 100,
                 'score': random.randint(0, 5),
-                'isBot': True
+                'isBot': True,
+                'lastUpdate': datetime.now().timestamp()
             }
 
     def update_bots(self):
@@ -54,21 +55,33 @@ class GameServer:
             if pdata.get("isBot"):
                 # Daha akıllı bot hareketi
                 time_factor = datetime.now().timestamp() * 0.5
+                old_x = pdata['x']
+                old_y = pdata['y']
+                
                 pdata['x'] += random.randint(-3, 3) + 2 * math.sin(time_factor + pdata['id'])
                 pdata['y'] += random.randint(-3, 3) + 2 * math.cos(time_factor + pdata['id'] * 0.7)
                 pdata['x'] = max(50, min(1950, pdata['x']))
                 pdata['y'] = max(50, min(1150, pdata['y']))
+                
+                # Bot pozisyonu değiştiyse diğer oyunculara bildir
+                if abs(old_x - pdata['x']) > 1 or abs(old_y - pdata['y']) > 1:
+                    pdata['rotation'] = math.atan2(pdata['y'] - old_y, pdata['x'] - old_x)
+                    asyncio.create_task(self.broadcast({
+                        'type': 'PLAYER_UPDATE',
+                        'playerId': pdata['id'],
+                        'x': pdata['x'],
+                        'y': pdata['y'],
+                        'vx': pdata['vx'],
+                        'vy': pdata['vy'],
+                        'rotation': pdata['rotation']
+                    }))
 
     async def register_client(self, websocket):
         client_id = self.next_client_id
         self.next_client_id += 1
         self.clients[client_id] = websocket
         
-        try:
-            logger.info(f"✅ Client {client_id} connected")
-        except:
-            logger.info(f"✅ Client {client_id} connected")
-            
+        logger.info(f"✅ Client {client_id} connected")
         return client_id
 
     async def unregister_client(self, client_id):
@@ -108,11 +121,13 @@ class GameServer:
             if msg_type == 'PLAYER_JOIN':
                 await self.handle_player_join(client_id, data)
             elif msg_type == 'PLAYER_UPDATE':
-                await self.handle_player_update(data)
+                await self.handle_player_update(client_id, data)
             elif msg_type == 'PLAYER_SHOOT':
                 await self.handle_player_shoot(data)
             elif msg_type == 'CHAT_MESSAGE':
                 await self.handle_chat_message(data)
+            elif msg_type == 'PLAYER_HIT':
+                await self.handle_player_hit(data)
                 
         except Exception as e:
             logger.error(f"Error handling message from client {client_id}: {e}")
@@ -133,7 +148,8 @@ class GameServer:
             'rotation': 0,
             'health': 100,
             'score': 0,
-            'joinTime': datetime.now().isoformat()
+            'joinTime': datetime.now().isoformat(),
+            'lastUpdate': datetime.now().timestamp()
         }
         
         self.players[player_id] = player_data
@@ -144,7 +160,9 @@ class GameServer:
             'playerId': player_id,
             'name': player_name,
             'x': player_data['x'],
-            'y': player_data['y']
+            'y': player_data['y'],
+            'health': player_data['health'],
+            'score': player_data['score']
         }, exclude_client=client_id)
         
         # Yeni oyuncuya mevcut dünya durumunu gönder
@@ -160,20 +178,43 @@ class GameServer:
         except Exception as e:
             logger.error(f"Failed to send world state to client {client_id}: {e}")
 
-    async def handle_player_update(self, data):
+    async def handle_player_update(self, client_id, data):
         player_id = data.get('playerId')
         if player_id in self.players:
+            player = self.players[player_id]
+            
+            # Client ID kontrolü - sadece kendi verisini güncelleyebilir
+            if player.get('client_id') != client_id:
+                logger.warning(f"Client {client_id} tried to update player {player_id}")
+                return
+            
             # Pozisyon güncellemesini kaydet
-            self.players[player_id].update({
-                'x': data.get('x', self.players[player_id]['x']),
-                'y': data.get('y', self.players[player_id]['y']),
+            old_x = player.get('x', 0)
+            old_y = player.get('y', 0)
+            
+            player.update({
+                'x': data.get('x', player['x']),
+                'y': data.get('y', player['y']),
                 'vx': data.get('vx', 0),
                 'vy': data.get('vy', 0),
-                'rotation': data.get('rotation', 0)
+                'rotation': data.get('rotation', 0),
+                'lastUpdate': datetime.now().timestamp()
             })
             
-            # Diğer oyunculara bildir (rate limiting ile - her update'i gönderme)
-            # Sadece önemli pozisyon değişikliklerini gönder
+            # 🔥 ÖNEMLİ: Pozisyon değişikliğini diğer oyunculara bildir
+            # Sadece önemli pozisyon değişikliklerinde gönder (optimizasyon)
+            if abs(old_x - player['x']) > 2 or abs(old_y - player['y']) > 2:
+                update_message = {
+                    'type': 'PLAYER_UPDATE',
+                    'playerId': player_id,
+                    'x': player['x'],
+                    'y': player['y'],
+                    'vx': player['vx'],
+                    'vy': player['vy'],
+                    'rotation': player['rotation']
+                }
+                # Güncelleyen client hariç herkese gönder
+                await self.broadcast(update_message, exclude_client=client_id)
 
     async def handle_player_shoot(self, data):
         shooter_id = data.get('playerId')
@@ -188,7 +229,60 @@ class GameServer:
                 'timestamp': datetime.now().timestamp()
             }
             await self.broadcast(shoot_data)
-            logger.info(f"Player {shooter_id} fired a shot")
+
+    async def handle_player_hit(self, data):
+        victim_id = data.get('victimId')
+        shooter_id = data.get('shooterId')
+        damage = data.get('damage', 20)
+        
+        if victim_id in self.players and shooter_id in self.players:
+            victim = self.players[victim_id]
+            shooter = self.players[shooter_id]
+            
+            # Hasar uygula
+            victim['health'] = max(0, victim['health'] - damage)
+            
+            # Ölüm kontrolü
+            if victim['health'] <= 0:
+                shooter['score'] += 1
+                
+                # Ölüm mesajı gönder
+                await self.broadcast({
+                    'type': 'PLAYER_DEATH',
+                    'victimId': victim_id,
+                    'shooterId': shooter_id,
+                    'killerName': shooter['name'],
+                    'victimName': victim['name']
+                })
+                
+                # Yeniden doğma
+                asyncio.create_task(self.respawn_player(victim_id))
+            else:
+                # Hasar mesajı gönder
+                await self.broadcast({
+                    'type': 'PLAYER_HIT',
+                    'victimId': victim_id,
+                    'health': victim['health'],
+                    'damage': damage
+                })
+
+    async def respawn_player(self, player_id):
+        await asyncio.sleep(3)  # 3 saniye bekle
+        
+        if player_id in self.players:
+            player = self.players[player_id]
+            player['health'] = 100
+            player['x'] = random.randint(200, 1800)
+            player['y'] = random.randint(200, 1000)
+            
+            # Yeniden doğma mesajı
+            await self.broadcast({
+                'type': 'PLAYER_RESPAWN',
+                'playerId': player_id,
+                'x': player['x'],
+                'y': player['y'],
+                'health': player['health']
+            })
 
     async def handle_player_leave(self, player_id):
         if player_id in self.players:
@@ -213,28 +307,41 @@ class GameServer:
         })
 
     async def game_loop(self):
-        """Ana oyun döngüsü - dünya durumunu periyodik olarak güncelle"""
+        """Ana oyun döngüsü"""
         while True:
             try:
-                await asyncio.sleep(1/10)  # 10 FPS for server (daha az yoğun)
+                await asyncio.sleep(0.05)  # 20 FPS for server
                 self.game_state['tick'] += 1
                 
                 # Botları güncelle
                 self.update_bots()
                 
-                # Her 5 saniyede dünya durumunu gönder (daha az sıklıkta)
-                if self.game_state['tick'] % 50 == 0:
-                    world_state = {
-                        'type': 'WORLD_STATE',
-                        'players': list(self.players.values()),
+                # 🔥 Bağlantısı kopan oyuncuları temizle
+                current_time = datetime.now().timestamp()
+                disconnected_players = []
+                
+                for player_id, player in self.players.items():
+                    if not player.get('isBot') and player.get('lastUpdate'):
+                        # 10 saniyedir güncelleme gelmemişse bağlantı kopmuştur
+                        if current_time - player['lastUpdate'] > 10:
+                            disconnected_players.append(player_id)
+                
+                for player_id in disconnected_players:
+                    await self.handle_player_leave(player_id)
+                
+                # Her 2 saniyede bir senkronizasyon mesajı gönder
+                if self.game_state['tick'] % 40 == 0:
+                    sync_data = {
+                        'type': 'SYNC',
                         'tick': self.game_state['tick'],
-                        'serverTime': datetime.now().timestamp()
+                        'serverTime': current_time,
+                        'playerCount': len([p for p in self.players.values() if not p.get('isBot')])
                     }
-                    await self.broadcast(world_state)
+                    await self.broadcast(sync_data)
                     
             except Exception as e:
                 logger.error(f"Error in game loop: {e}")
-                await asyncio.sleep(2)  # Hata durumunda daha uzun bekle
+                await asyncio.sleep(1)
 
 # Global server instance
 game_server = GameServer()
@@ -243,7 +350,8 @@ async def websocket_handler(request):
     """WebSocket bağlantılarını handle et"""
     ws = web.WebSocketResponse(
         heartbeat=30,  # 30 saniye heartbeat
-        timeout=60     # 60 saniye timeout
+        timeout=60,    # 60 saniye timeout
+        autoping=True  # Otomatik ping/pong
     )
     await ws.prepare(request)
     
@@ -271,12 +379,29 @@ async def websocket_handler(request):
 
 async def health_check(request):
     """Health check endpoint"""
-    return web.Response(text="OK", status=200)
+    player_count = len([p for p in game_server.players.values() if not p.get('isBot')])
+    bot_count = len([p for p in game_server.players.values() if p.get('isBot')])
+    
+    health_data = {
+        "status": "OK",
+        "players": player_count,
+        "bots": bot_count,
+        "total_entities": len(game_server.players),
+        "tick": game_server.game_state['tick'],
+        "uptime": int(datetime.now().timestamp() - game_server.game_state.get('start_time', 0))
+    }
+    
+    return web.json_response(health_data)
 
 async def serve_static(request):
     """Static dosyaları serve et"""
     filename = request.match_info['filename']
-    filepath = os.path.join('../client', filename)  # ../client/ yolunu kullan
+    
+    # Güvenlik kontrolü - path traversal engelle
+    if '..' in filename or filename.startswith('/'):
+        return web.Response(text="Invalid path", status=400)
+    
+    filepath = os.path.join('../client', filename)
     
     if not os.path.exists(filepath):
         return web.Response(text="File not found", status=404)
@@ -289,11 +414,22 @@ async def serve_static(request):
         content_type = 'text/css'
     elif filename.endswith('.js'):
         content_type = 'application/javascript'
+    elif filename.endswith('.png'):
+        content_type = 'image/png'
+    elif filename.endswith('.jpg') or filename.endswith('.jpeg'):
+        content_type = 'image/jpeg'
     
     try:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            content = f.read()
-        return web.Response(text=content, content_type=content_type)
+        # Binary dosyalar için
+        if content_type.startswith('image/'):
+            with open(filepath, 'rb') as f:
+                content = f.read()
+            return web.Response(body=content, content_type=content_type)
+        else:
+            # Text dosyalar için
+            with open(filepath, 'r', encoding='utf-8') as f:
+                content = f.read()
+            return web.Response(text=content, content_type=content_type)
     except Exception as e:
         logger.error(f"Error serving {filename}: {e}")
         return web.Response(text="Error loading file", status=500)
@@ -301,7 +437,7 @@ async def serve_static(request):
 async def index_handler(request):
     """Ana sayfa - Oyun client'ını serve et"""
     try:
-        # ../client/index.html dosyasını oku (server klasöründen çıkıp client'a git)
+        # ../client/index.html dosyasını oku
         if os.path.exists('../client/index.html'):
             with open('../client/index.html', 'r', encoding='utf-8') as f:
                 html = f.read()
@@ -312,18 +448,62 @@ async def index_handler(request):
             <!DOCTYPE html>
             <html>
             <head>
-                <title>Game Server</title>
+                <title>Multiplayer Arena</title>
                 <style>
-                    body { font-family: Arial; background: #222; color: white; text-align: center; padding: 50px; }
+                    body { 
+                        font-family: Arial; 
+                        background: #0a0a0a; 
+                        color: white; 
+                        text-align: center; 
+                        padding: 50px;
+                        margin: 0;
+                    }
+                    .container {
+                        max-width: 800px;
+                        margin: 0 auto;
+                    }
+                    h1 { 
+                        color: #00ff88; 
+                        font-size: 3em;
+                        margin-bottom: 0.5em;
+                    }
+                    .status { 
+                        background: #1a1a1a;
+                        padding: 20px;
+                        border-radius: 10px;
+                        margin: 20px 0;
+                    }
+                    .online { color: #00ff88; }
                     .error { color: #ff6666; }
+                    code { 
+                        background: #2a2a2a; 
+                        padding: 5px 10px; 
+                        border-radius: 5px;
+                        font-size: 1.1em;
+                    }
+                    a { 
+                        color: #00aaff; 
+                        text-decoration: none;
+                    }
+                    a:hover { text-decoration: underline; }
                 </style>
             </head>
             <body>
-                <h1>🎮 WebSocket Game Server</h1>
-                <p class="error">Client files not found!</p>
-                <p>Server is running at: <code>ws://this-domain/ws</code></p>
-                <p>Please upload client files to serve the game.</p>
-                <p>Health check: <a href="/health">/health</a></p>
+                <div class="container">
+                    <h1>🎮 Multiplayer Arena</h1>
+                    <div class="status">
+                        <p class="online">✅ Server is running!</p>
+                        <p>WebSocket endpoint: <code>ws://this-domain/ws</code></p>
+                    </div>
+                    <div class="status error">
+                        <p>⚠️ Client files not found!</p>
+                        <p>Please upload the game client files to the <code>client/</code> directory.</p>
+                    </div>
+                    <p>
+                        <a href="/health">Health Check</a> | 
+                        <a href="https://github.com/yourusername/multiplayer-arena">GitHub</a>
+                    </p>
+                </div>
             </body>
             </html>
             """
@@ -351,7 +531,7 @@ async def create_app():
     app.router.add_get('/health', health_check)
     app.router.add_get('/healthz', health_check)  # Kubernetes style
     app.router.add_get('/ws', websocket_handler)
-    app.router.add_get('/{filename}', serve_static)  # Static dosyalar için
+    app.router.add_get('/{filename}', serve_static)
     
     # CORS'u tüm route'lara ekle
     for route in list(app.router.routes()):
@@ -361,6 +541,9 @@ async def create_app():
 
 async def main():
     """Ana server başlatıcı"""
+    # Başlangıç zamanını kaydet
+    game_server.game_state['start_time'] = datetime.now().timestamp()
+    
     # Game loop'u başlat
     game_loop_task = asyncio.create_task(game_server.game_loop())
     
@@ -368,9 +551,10 @@ async def main():
     port = int(os.environ.get("PORT", 8080))
     host = "0.0.0.0"
     
-    logger.info(f"🚀 Starting Game Server on http://{host}:{port}")
-    logger.info(f"🌐 WebSocket endpoint: ws://{host}:{port}/ws")
-    logger.info(f"💚 Health check: http://{host}:{port}/health")
+    logger.info(f"🚀 Starting Multiplayer Arena Server")
+    logger.info(f"🌐 Host: {host}:{port}")
+    logger.info(f"🔌 WebSocket: ws://{host}:{port}/ws")
+    logger.info(f"💚 Health: http://{host}:{port}/health")
     
     try:
         # Aiohttp app oluştur
@@ -384,6 +568,7 @@ async def main():
         await site.start()
         
         logger.info("✅ Server is ready and accepting connections!")
+        logger.info(f"🤖 Spawned {len(game_server.players)} bots")
         
         # Sonsuza kadar çalış
         await asyncio.Future()
