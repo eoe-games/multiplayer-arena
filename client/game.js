@@ -42,7 +42,8 @@ class GameClient {
         this.accumulator = 0;
         this.frameTime = 1000 / 60; // 60 FPS
 
-        // Network simulation (will be replaced with WebSocket)
+        // Network
+        this.lastPositionUpdate = 0;
         this.serverUpdateRate = 1000 / 30; // 30Hz
         this.lastServerUpdate = 0;
 
@@ -160,96 +161,88 @@ class GameClient {
         }, 500);
     }
 
-    // game.js'de connect() fonksiyonunu bulun ve şöyle değiştirin:
+    connect() {
+        console.log('🔗 Connecting to server...');
+        
+        // Render URL'ini otomatik algıla
+        let serverURL;
+        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+            serverURL = 'ws://localhost:8080/ws';
+        } else {
+            // Render'da HTTPS kullanıldığı için WSS kullan
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            serverURL = `${protocol}//${window.location.host}/ws`;
+        }
+        
+        console.log('🔗 Connecting to:', serverURL);
 
-// connect() fonksiyonunu bulun ve şöyle değiştirin:
-connect() {
-    console.log('🔗 Connecting to server...');
-    
-    // Render URL'ini otomatik algıla
-    let serverURL;
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-        serverURL = 'ws://localhost:8080/ws';
-    } else {
-        // Render'da HTTPS kullanıldığı için WSS kullan
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        serverURL = `${protocol}//${window.location.host}/ws`;
-    }
-    
-    console.log('🔗 Connecting to:', serverURL);
+        try {
+            this.ws = new WebSocket(serverURL);
 
-    try {
-        this.ws = new WebSocket(serverURL);
+            this.ws.onopen = () => {
+                console.log('✅ WebSocket connected!');
+                this.connected = true;
+                this.gameState = 'playing';
+                this.localPlayerId = Math.floor(Math.random() * 10000);
 
-        this.ws.onopen = () => {
-            console.log('✅ WebSocket connected!');
-            this.connected = true;
-            this.gameState = 'playing';
-            this.localPlayerId = Math.floor(Math.random() * 10000);
+                this.sendToServer({
+                    type: 'PLAYER_JOIN',
+                    playerId: this.localPlayerId,
+                    name: this.playerName
+                });
 
-            this.sendToServer({
-                type: 'PLAYER_JOIN',
-                playerId: this.localPlayerId,
-                name: this.playerName
-            });
+                const player = {
+                    id: this.localPlayerId,
+                    name: this.playerName,
+                    x: Math.random() * 1600 + 100,
+                    y: Math.random() * 800 + 100,
+                    vx: 0,
+                    vy: 0,
+                    rotation: 0,
+                    health: 100,
+                    maxHealth: 100,
+                    radius: 20,
+                    color: this.getRandomColor(),
+                    score: 0
+                };
 
-            const player = {
-                id: this.localPlayerId,
-                name: this.playerName,
-                x: Math.random() * 1600 + 100,
-                y: Math.random() * 800 + 100,
-                vx: 0,
-                vy: 0,
-                rotation: 0,
-                health: 100,
-                maxHealth: 100,
-                radius: 20,
-                color: this.getRandomColor(),
-                score: 0
+                this.players.set(this.localPlayerId, player);
+                this.addChatMessage('System', 'Connected to server!', '#00ff88');
             };
 
-            this.players.set(this.localPlayerId, player);
-            this.addChatMessage('System', 'Connected to server!', '#00ff88');
-        };
+            this.ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    this.handleServerMessage(data);
+                } catch (e) {
+                    console.error('Failed to parse server message:', e);
+                }
+            };
 
-        this.ws.onmessage = (event) => {
-            try {
-                const data = JSON.parse(event.data);
-                this.handleServerMessage(data);
-            } catch (e) {
-                console.error('Failed to parse server message:', e);
-            }
-        };
+            this.ws.onerror = (error) => {
+                console.error('❌ WebSocket error:', error);
+                this.addChatMessage('System', 'Connection error! Switching to offline mode...', '#ff0000');
+                setTimeout(() => {
+                    this.startSimulationMode();
+                }, 1000);
+            };
 
-        this.ws.onerror = (error) => {
-            console.error('❌ WebSocket error:', error);
-            this.addChatMessage('System', 'Connection error! Switching to offline mode...', '#ff0000');
-            // 🔥 Otomatik offline moda geç
-            setTimeout(() => {
-                this.startSimulationMode();
-            }, 1000);
-        };
+            this.ws.onclose = (event) => {
+                console.log('📴 WebSocket disconnected:', event.code, event.reason);
+                this.connected = false;
+                this.addChatMessage('System', 'Disconnected from server! Switching to offline mode...', '#ff0000');
+                setTimeout(() => {
+                    this.startSimulationMode();
+                }, 1000);
+            };
 
-        this.ws.onclose = (event) => {
-            console.log('📴 WebSocket disconnected:', event.code, event.reason);
-            this.connected = false;
-            this.addChatMessage('System', 'Disconnected from server! Switching to offline mode...', '#ff0000');
-            // 🔥 Otomatik offline moda geç
-            setTimeout(() => {
-                this.startSimulationMode();
-            }, 1000);
-        };
-
-    } catch (error) {
-        console.error('Failed to create WebSocket:', error);
-        this.addChatMessage('System', 'Cannot connect to server! Running in offline mode...', '#ffaa00');
-        this.startSimulationMode();
+        } catch (error) {
+            console.error('Failed to create WebSocket:', error);
+            this.addChatMessage('System', 'Cannot connect to server! Running in offline mode...', '#ffaa00');
+            this.startSimulationMode();
+        }
     }
-}
 
-
-
-// Yeni fonksiyon ekleyin - simülasyon modu
     startSimulationMode() {
         console.log('🎮 Starting in simulation mode...');
         this.connected = true;
@@ -282,14 +275,12 @@ connect() {
         this.addChatMessage('System', 'Running in offline mode', '#ffaa00');
     }
 
-// Server'a mesaj gönderme fonksiyonu ekleyin
     sendToServer(data) {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify(data));
         }
     }
 
-// Server mesajlarını işleme fonksiyonu ekleyin
     handleServerMessage(data) {
         switch (data.type) {
             case 'WORLD_STATE':
@@ -304,8 +295,28 @@ connect() {
                 this.handlePlayerLeave(data);
                 break;
 
+            case 'PLAYER_UPDATE':
+                this.handlePlayerUpdate(data);
+                break;
+
             case 'PLAYER_SHOOT':
                 this.handlePlayerShoot(data);
+                break;
+
+            case 'PLAYER_HIT':
+                this.handlePlayerHit(data);
+                break;
+
+            case 'PLAYER_DEATH':
+                this.handlePlayerDeath(data);
+                break;
+
+            case 'PLAYER_RESPAWN':
+                this.handlePlayerRespawn(data);
+                break;
+
+            case 'SYNC':
+                this.handleSync(data);
                 break;
 
             default:
@@ -313,7 +324,6 @@ connect() {
         }
     }
 
-// Dünya durumunu güncelleme
     updateWorldState(data) {
         if (data.players) {
             data.players.forEach(playerData => {
@@ -344,8 +354,6 @@ connect() {
         }
     }
 
-
-// Yeni oyuncu katıldığında
     handlePlayerJoin(data) {
         if (data.playerId !== this.localPlayerId) {
             const player = {
@@ -368,7 +376,6 @@ connect() {
         }
     }
 
-// Oyuncu ayrıldığında
     handlePlayerLeave(data) {
         const player = this.players.get(data.playerId);
         if (player) {
@@ -377,79 +384,113 @@ connect() {
         }
     }
 
-// updateLocalPlayer fonksiyonunda input gönder
-    updateLocalPlayer(deltaTime) {
-        const player = this.players.get(this.localPlayerId);
-        if (!player) return;
-
-        // Movement
-        const speed = 300;
-        let dx = 0, dy = 0;
-
-        if (this.input.keys['w']) dy -= 1;
-        if (this.input.keys['s']) dy += 1;
-        if (this.input.keys['a']) dx -= 1;
-        if (this.input.keys['d']) dx += 1;
-
-        // Normalize diagonal movement
-        if (dx !== 0 && dy !== 0) {
-            dx *= 0.707;
-            dy *= 0.707;
-        }
-
-        // Apply movement
-        player.vx = dx * speed;
-        player.vy = dy * speed;
-
-        // Update position
-        player.x += player.vx * deltaTime;
-        player.y += player.vy * deltaTime;
-
-        // World bounds
-        player.x = Math.max(50, Math.min(2000 - 50, player.x));
-        player.y = Math.max(50, Math.min(1200 - 50, player.y));
-
-        // Update rotation to face mouse
-        const worldMouseX = this.input.mouseX + this.camera.x;
-        const worldMouseY = this.input.mouseY + this.camera.y;
-        player.rotation = Math.atan2(worldMouseY - player.y, worldMouseX - player.x);
-
-        // Server'a pozisyon gönder
-        this.sendToServer({
-            type: 'PLAYER_UPDATE',
-            playerId: this.localPlayerId,
-            x: player.x,
-            y: player.y,
-            vx: player.vx,
-            vy: player.vy,
-            rotation: player.rotation
-        });
-
-        // Shooting
-        if (this.input.mouseDown) {
-            this.shoot(player);
+    handlePlayerUpdate(data) {
+        const player = this.players.get(data.playerId);
+        if (player && data.playerId !== this.localPlayerId) {
+            // Diğer oyuncuların pozisyonlarını güncelle
+            player.x = data.x;
+            player.y = data.y;
+            player.vx = data.vx || 0;
+            player.vy = data.vy || 0;
+            player.rotation = data.rotation || 0;
         }
     }
 
-    spawnBot() {
-        const botId = Math.floor(Math.random() * 10000);
-        const bot = {
-            id: botId,
-            name: `Bot${botId}`,
-            x: Math.random() * 1600 + 100,
-            y: Math.random() * 800 + 100,
-            vx: 0,
-            vy: 0,
-            rotation: 0,
-            health: 100,
-            maxHealth: 100,
-            radius: 20,
-            color: this.getRandomColor(),
-            score: Math.floor(Math.random() * 10),
-            isBot: true
-        };
+    handlePlayerShoot(data) {
+        // Başka bir oyuncu ateş ettiğinde
+        if (data.shooterId !== this.localPlayerId) {
+            const shooter = this.players.get(data.shooterId);
+            if (shooter) {
+                // Mermi oluştur
+                const projectileId = `${data.shooterId}_${data.timestamp}`;
+                const projectile = {
+                    id: projectileId,
+                    shooterId: data.shooterId,
+                    x: data.x,
+                    y: data.y,
+                    vx: Math.cos(data.rotation) * 800,
+                    vy: Math.sin(data.rotation) * 800,
+                    radius: 5,
+                    damage: 20,
+                    lifetime: 2
+                };
+                
+                this.projectiles.set(projectileId, projectile);
+                
+                // Efektler
+                this.createMuzzleFlash(data.x, data.y, data.rotation);
+                this.playSound('shoot');
+            }
+        }
+    }
 
-        this.players.set(botId, bot);
+    handlePlayerHit(data) {
+        const victim = this.players.get(data.victimId);
+        if (victim) {
+            victim.health = data.health;
+            
+            // Hit efekti oluştur
+            this.createHitEffect(victim.x, victim.y);
+            
+            // Kendi karakterimize vurulduysa ekranı salla
+            if (data.victimId === this.localPlayerId) {
+                this.camera.shake = 10;
+            }
+        }
+    }
+
+    handlePlayerDeath(data) {
+        const victim = this.players.get(data.victimId);
+        const killer = this.players.get(data.shooterId);
+        
+        if (victim) {
+            victim.health = 0;
+            this.createExplosion(victim.x, victim.y);
+        }
+        
+        // Kill feed'e ekle
+        this.addKillFeedEntry(data.killerName, data.victimName);
+        
+        // Skor güncelle
+        if (killer) {
+            killer.score = (killer.score || 0) + 1;
+        }
+        
+        if (data.shooterId === this.localPlayerId) {
+            this.stats.kills++;
+        }
+        if (data.victimId === this.localPlayerId) {
+            this.stats.deaths++;
+        }
+    }
+
+    handlePlayerRespawn(data) {
+        const player = this.players.get(data.playerId);
+        if (player) {
+            player.x = data.x;
+            player.y = data.y;
+            player.health = data.health;
+            
+            // Respawn efekti
+            for (let i = 0; i < 10; i++) {
+                const angle = (Math.PI * 2 * i) / 10;
+                this.particles.push({
+                    x: data.x + Math.cos(angle) * 20,
+                    y: data.y + Math.sin(angle) * 20,
+                    vx: Math.cos(angle) * 100,
+                    vy: Math.sin(angle) * 100,
+                    life: 0.5,
+                    maxLife: 0.5,
+                    color: '#00ff88',
+                    size: 3
+                });
+            }
+        }
+    }
+
+    handleSync(data) {
+        // Server ile senkronizasyon
+        this.ping = Math.round((Date.now() - data.serverTime * 1000) / 2);
     }
 
     update(deltaTime) {
@@ -466,13 +507,6 @@ connect() {
         this.updateProjectiles(deltaTime);
         this.updateParticles(deltaTime);
         this.updateExplosions(deltaTime);
-
-        // Simulate server updates
-        this.lastServerUpdate += deltaTime * 1000;
-        if (this.lastServerUpdate >= this.serverUpdateRate) {
-            this.simulateServerUpdate();
-            this.lastServerUpdate = 0;
-        }
 
         // Update UI
         this.updateUI();
@@ -502,6 +536,9 @@ connect() {
         player.vy = dy * speed;
 
         // Update position
+        const oldX = player.x;
+        const oldY = player.y;
+        
         player.x += player.vx * deltaTime;
         player.y += player.vy * deltaTime;
 
@@ -514,6 +551,30 @@ connect() {
         const worldMouseY = this.input.mouseY + this.camera.y;
         player.rotation = Math.atan2(worldMouseY - player.y, worldMouseX - player.x);
 
+        // Pozisyon değişikliğinde server'a gönder (rate limited)
+        if (!this.lastPositionUpdate) this.lastPositionUpdate = 0;
+        const now = Date.now();
+        
+        // Her 50ms'de bir veya önemli değişikliklerde gönder
+        const positionChanged = Math.abs(oldX - player.x) > 1 || Math.abs(oldY - player.y) > 1;
+        const rotationChanged = Math.abs((player.lastSentRotation || 0) - player.rotation) > 0.1;
+        
+        if (positionChanged || rotationChanged) {
+            if (now - this.lastPositionUpdate > 50) {  // 20 updates per second max
+                this.sendToServer({
+                    type: 'PLAYER_UPDATE',
+                    playerId: this.localPlayerId,
+                    x: player.x,
+                    y: player.y,
+                    vx: player.vx,
+                    vy: player.vy,
+                    rotation: player.rotation
+                });
+                this.lastPositionUpdate = now;
+                player.lastSentRotation = player.rotation;
+            }
+        }
+
         // Shooting
         if (this.input.mouseDown) {
             this.shoot(player);
@@ -521,27 +582,30 @@ connect() {
     }
 
     updateBots(deltaTime) {
-        this.players.forEach(bot => {
-            if (!bot.isBot) return;
+        // Offline mode'da botları güncelle
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+            this.players.forEach(bot => {
+                if (!bot.isBot) return;
 
-            // Simple AI movement
-            const time = Date.now() * 0.001;
-            bot.vx = Math.sin(time + bot.id) * 100;
-            bot.vy = Math.cos(time + bot.id * 0.7) * 100;
+                // Simple AI movement
+                const time = Date.now() * 0.001;
+                bot.vx = Math.sin(time + bot.id) * 100;
+                bot.vy = Math.cos(time + bot.id * 0.7) * 100;
 
-            bot.x += bot.vx * deltaTime;
-            bot.y += bot.vy * deltaTime;
+                bot.x += bot.vx * deltaTime;
+                bot.y += bot.vy * deltaTime;
 
-            // Bounds
-            bot.x = Math.max(50, Math.min(2000 - 50, bot.x));
-            bot.y = Math.max(50, Math.min(1200 - 50, bot.y));
+                // Bounds
+                bot.x = Math.max(50, Math.min(2000 - 50, bot.x));
+                bot.y = Math.max(50, Math.min(1200 - 50, bot.y));
 
-            // Random shooting
-            if (Math.random() < 0.01) {
-                bot.rotation = Math.random() * Math.PI * 2;
-                this.shoot(bot);
-            }
-        });
+                // Random shooting
+                if (Math.random() < 0.01) {
+                    bot.rotation = Math.random() * Math.PI * 2;
+                    this.shoot(bot);
+                }
+            });
+        }
     }
 
     shoot(shooter) {
@@ -566,6 +630,17 @@ connect() {
         };
 
         this.projectiles.set(projectileId, projectile);
+
+        // Server'a ateş bilgisini gönder
+        if (shooter.id === this.localPlayerId) {
+            this.sendToServer({
+                type: 'PLAYER_SHOOT',
+                playerId: shooter.id,
+                x: projectile.x,
+                y: projectile.y,
+                rotation: shooter.rotation
+            });
+        }
 
         // Muzzle flash effect
         this.createMuzzleFlash(projectile.x, projectile.y, shooter.rotation);
@@ -609,20 +684,21 @@ connect() {
     }
 
     handleHit(player, projectile) {
-        player.health -= projectile.damage;
-
-        // Create hit effect
+        // Hit efekti
         this.createHitEffect(player.x, player.y);
-
-        // Camera shake
-        if (player.id === this.localPlayerId) {
-            this.camera.shake = 10;
+        
+        // Server'a hit bilgisi gönder
+        if (projectile.shooterId === this.localPlayerId) {
+            this.sendToServer({
+                type: 'PLAYER_HIT',
+                shooterId: projectile.shooterId,
+                victimId: player.id,
+                damage: projectile.damage
+            });
         }
-
-        // Check for kill
-        if (player.health <= 0) {
-            this.handleKill(player, projectile.shooterId);
-        }
+        
+        // Mermiyi sil
+        this.projectiles.delete(projectile.id);
     }
 
     handleKill(victim, killerId) {
@@ -1010,8 +1086,8 @@ connect() {
         // FPS
         this.ui.fps.textContent = Math.round(this.fps);
 
-        // Ping (simulated)
-        this.ui.ping.textContent = Math.floor(20 + Math.random() * 10);
+        // Ping - gerçek değeri göster
+        this.ui.ping.textContent = this.ping || 'N/A';
 
         // Stats
         this.ui.kills.textContent = this.stats.kills;
@@ -1097,24 +1173,12 @@ connect() {
         this.addChatMessage(this.playerName, message);
         this.ui.chatInput.value = '';
 
-        // Simulate other players responding
-        if (Math.random() < 0.3) {
-            setTimeout(() => {
-                const responses = ['Nice shot!', 'GG', 'Let\'s go!', 'Watch out!'];
-                const randomBot = Array.from(this.players.values()).find(p => p.isBot);
-                if (randomBot) {
-                    this.addChatMessage(
-                        randomBot.name,
-                        responses[Math.floor(Math.random() * responses.length)]
-                    );
-                }
-            }, 1000 + Math.random() * 2000);
-        }
-    }
-
-    simulateServerUpdate() {
-        // This will be replaced with actual WebSocket communication
-        // For now, just update bot positions randomly
+        // Server'a chat mesajı gönder
+        this.sendToServer({
+            type: 'CHAT_MESSAGE',
+            playerId: this.localPlayerId,
+            message: message
+        });
     }
 
     playSound(type) {
@@ -1141,6 +1205,27 @@ connect() {
             (G < 255 ? G < 1 ? 0 : G : 255) * 0x100 +
             (B < 255 ? B < 1 ? 0 : B : 255))
             .toString(16).slice(1);
+    }
+
+    spawnBot() {
+        const botId = -Math.floor(Math.random() * 10000);
+        const bot = {
+            id: botId,
+            name: `Bot${Math.abs(botId)}`,
+            x: Math.random() * 1600 + 100,
+            y: Math.random() * 800 + 100,
+            vx: 0,
+            vy: 0,
+            rotation: 0,
+            health: 100,
+            maxHealth: 100,
+            radius: 20,
+            color: this.getRandomColor(),
+            score: Math.floor(Math.random() * 10),
+            isBot: true
+        };
+
+        this.players.set(botId, bot);
     }
 
     startGameLoop() {
