@@ -53,19 +53,42 @@ class GameServer:
     def update_bots(self):
         for pdata in self.players.values():
             if pdata.get("isBot"):
-                # Daha akıllı bot hareketi
-                time_factor = datetime.now().timestamp() * 0.5
-                old_x = pdata['x']
-                old_y = pdata['y']
+                # Daha yavaş ve düzgün bot hareketi
+                time_factor = datetime.now().timestamp() * 0.001  # Çok daha yavaş
+                bot_id_factor = abs(pdata['id']) * 0.0001  # Bot ID'sine göre farklı hızlar
                 
-                pdata['x'] += random.randint(-3, 3) + 2 * math.sin(time_factor + pdata['id'])
-                pdata['y'] += random.randint(-3, 3) + 2 * math.cos(time_factor + pdata['id'] * 0.7)
+                # Hedef pozisyon belirle (daire çizme)
+                center_x = 1000
+                center_y = 600
+                radius = 300 + (abs(pdata['id']) % 200)  # Farklı yarıçaplar
+                
+                angle = time_factor + bot_id_factor * math.pi * 2
+                target_x = center_x + math.cos(angle) * radius
+                target_y = center_y + math.sin(angle) * radius
+                
+                # Mevcut pozisyondan hedefe doğru yavaşça hareket et
+                dx = target_x - pdata['x']
+                dy = target_y - pdata['y']
+                
+                # Hızı sınırla
+                speed = 0.1
+                pdata['x'] += dx * speed
+                pdata['y'] += dy * speed
+                
+                # Dünya sınırları
                 pdata['x'] = max(50, min(1950, pdata['x']))
                 pdata['y'] = max(50, min(1150, pdata['y']))
                 
-                # Bot pozisyonu değiştiyse diğer oyunculara bildir
-                if abs(old_x - pdata['x']) > 1 or abs(old_y - pdata['y']) > 1:
-                    pdata['rotation'] = math.atan2(pdata['y'] - old_y, pdata['x'] - old_x)
+                # Velocity hesapla (görsel için)
+                pdata['vx'] = dx * speed * 10
+                pdata['vy'] = dy * speed * 10
+                
+                # Rotasyonu güncelle
+                if abs(dx) > 0.1 or abs(dy) > 0.1:
+                    pdata['rotation'] = math.atan2(dy, dx)
+                
+                # Her 10 update'de bir pozisyon gönder (performans için)
+                if self.game_state['tick'] % 10 == 0:
                     asyncio.create_task(self.broadcast({
                         'type': 'PLAYER_UPDATE',
                         'playerId': pdata['id'],
@@ -198,10 +221,10 @@ class GameServer:
                 'vx': data.get('vx', 0),
                 'vy': data.get('vy', 0),
                 'rotation': data.get('rotation', 0),
-                'lastUpdate': datetime.now().timestamp()
+                'lastUpdate': datetime.now().timestamp()  # 🔥 ÖNEMLİ: lastUpdate'i güncelle!
             })
             
-            # 🔥 ÖNEMLİ: Pozisyon değişikliğini diğer oyunculara bildir
+            # Pozisyon değişikliğini diğer oyunculara bildir
             # Sadece önemli pozisyon değişikliklerinde gönder (optimizasyon)
             if abs(old_x - player['x']) > 2 or abs(old_y - player['y']) > 2:
                 update_message = {
@@ -316,15 +339,16 @@ class GameServer:
                 # Botları güncelle
                 self.update_bots()
                 
-                # 🔥 Bağlantısı kopan oyuncuları temizle
+                # Bağlantısı kopan oyuncuları temizle
                 current_time = datetime.now().timestamp()
                 disconnected_players = []
                 
                 for player_id, player in self.players.items():
                     if not player.get('isBot') and player.get('lastUpdate'):
-                        # 10 saniyedir güncelleme gelmemişse bağlantı kopmuştur
-                        if current_time - player['lastUpdate'] > 10:
+                        # 30 saniyedir güncelleme gelmemişse bağlantı kopmuştur (10'dan 30'a çıkardık)
+                        if current_time - player['lastUpdate'] > 30:
                             disconnected_players.append(player_id)
+                            logger.warning(f"Player {player_id} timed out (no update for 30s)")
                 
                 for player_id in disconnected_players:
                     await self.handle_player_leave(player_id)
@@ -338,6 +362,17 @@ class GameServer:
                         'playerCount': len([p for p in self.players.values() if not p.get('isBot')])
                     }
                     await self.broadcast(sync_data)
+                    
+                # Her 10 saniyede bir full world state gönder (güvenlik için)
+                if self.game_state['tick'] % 200 == 0:
+                    world_state = {
+                        'type': 'WORLD_STATE',
+                        'players': list(self.players.values()),
+                        'tick': self.game_state['tick'],
+                        'serverTime': current_time
+                    }
+                    await self.broadcast(world_state)
+                    logger.info(f"Sent world state - {len(self.players)} players online")
                     
             except Exception as e:
                 logger.error(f"Error in game loop: {e}")
