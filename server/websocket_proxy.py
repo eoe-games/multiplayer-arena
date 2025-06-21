@@ -98,19 +98,50 @@ class GameServer:
                 # lastUpdate güncelle
                 pdata['lastUpdate'] = current_time
                 
-                # Rastgele ateş etme (her 1-3 saniyede bir)
+                # En yakın oyuncuyu bul ve ona doğru ateş et
                 if current_time - pdata.get('lastShot', 0) > random.uniform(1, 3):
-                    pdata['lastShot'] = current_time
-                    # Rastgele bir yöne ateş et
-                    shoot_angle = random.uniform(0, math.pi * 2)
-                    asyncio.create_task(self.broadcast({
-                        'type': 'PLAYER_SHOOT',
-                        'shooterId': pdata['id'],
-                        'x': pdata['x'] + math.cos(shoot_angle) * 30,
-                        'y': pdata['y'] + math.sin(shoot_angle) * 30,
-                        'rotation': shoot_angle,
-                        'timestamp': current_time
-                    }))
+                    # Canlı oyuncuları bul
+                    alive_players = [p for p in self.players.values() 
+                                   if p['id'] != pdata['id'] 
+                                   and not p.get('isDead', False)
+                                   and p['health'] > 0]
+                    
+                    if alive_players:
+                        # En yakın oyuncuyu bul
+                        closest_player = None
+                        min_distance = float('inf')
+                        
+                        for target in alive_players:
+                            dist = math.sqrt((target['x'] - pdata['x'])**2 + 
+                                           (target['y'] - pdata['y'])**2)
+                            if dist < min_distance and dist < 500:  # 500 birim menzil
+                                min_distance = dist
+                                closest_player = target
+                        
+                        if closest_player:
+                            # Hedefe doğru ateş et
+                            dx = closest_player['x'] - pdata['x']
+                            dy = closest_player['y'] - pdata['y']
+                            shoot_rotation = math.atan2(dy, dx)
+                            
+                            # Biraz rastgelelik ekle (perfect aim olmasın)
+                            shoot_rotation += random.uniform(-0.2, 0.2)
+                            
+                            # Namlu pozisyonunu hesapla
+                            muzzle_offset = 30
+                            shoot_x = pdata['x'] + math.cos(shoot_rotation) * muzzle_offset
+                            shoot_y = pdata['y'] + math.sin(shoot_rotation) * muzzle_offset
+                            
+                            pdata['lastShot'] = current_time
+                            
+                            asyncio.create_task(self.broadcast({
+                                'type': 'PLAYER_SHOOT',
+                                'shooterId': pdata['id'],
+                                'x': shoot_x,
+                                'y': shoot_y,
+                                'rotation': shoot_rotation,
+                                'timestamp': current_time
+                            }))
                 
                 # Her tick pozisyon gönder (smooth hareket için)
                 asyncio.create_task(self.broadcast({
