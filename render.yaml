@@ -1,1 +1,10 @@
-
+services:
+  - type: web
+    name: multiplayer-arena-cpp
+    env: docker
+    dockerfilePath: ./server/Dockerfile
+    envVars:
+      - key: PORT
+        value: 8080
+    healthCheckPath: /health
+    autoDeploy: false
