@@ -32,7 +32,7 @@ class GameServer:
         self.spawn_bots(3)  # başlangıçta 3 bot spawn
 
     def spawn_bots(self, count):
-        for _ in range(count):
+        for i in range(count):
             bot_id = self.next_bot_id
             self.next_bot_id -= 1
             self.players[bot_id] = {
@@ -47,46 +47,81 @@ class GameServer:
                 'health': 100,
                 'score': random.randint(0, 5),
                 'isBot': True,
-                'lastUpdate': datetime.now().timestamp()
+                'lastUpdate': datetime.now().timestamp(),
+                'lastShot': 0,  # Ateş etme için
+                'targetX': random.randint(200, 1800),  # Hedef pozisyon
+                'targetY': random.randint(200, 1000),
+                'moveTimer': 0  # Hareket zamanlayıcı
             }
 
     def update_bots(self):
+        current_time = datetime.now().timestamp()
+        
         for pdata in self.players.values():
-            if pdata.get("isBot"):
-                # Eski bot hareketi - daha dinamik ve eğlenceli
-                time_factor = datetime.now().timestamp() * 0.5
-                old_x = pdata['x']
-                old_y = pdata['y']
+            if pdata.get("isBot") and not pdata.get('isDead', False):
+                # Her 2-5 saniyede bir yeni hedef belirle
+                if current_time - pdata.get('moveTimer', 0) > random.uniform(2, 5):
+                    pdata['targetX'] = random.randint(200, 1800)
+                    pdata['targetY'] = random.randint(200, 1000)
+                    pdata['moveTimer'] = current_time
                 
-                pdata['x'] += random.randint(-3, 3) + 2 * math.sin(time_factor + pdata['id'])
-                pdata['y'] += random.randint(-3, 3) + 2 * math.cos(time_factor + pdata['id'] * 0.7)
+                # Hedefe doğru yumuşak hareket
+                dx = pdata['targetX'] - pdata['x']
+                dy = pdata['targetY'] - pdata['y']
+                distance = math.sqrt(dx*dx + dy*dy)
+                
+                if distance > 10:  # Hedefe yakın değilse hareket et
+                    # Normalize et ve hız uygula
+                    speed = 150  # Sabit hız
+                    normalized_dx = dx / distance
+                    normalized_dy = dy / distance
+                    
+                    # Frame-independent hareket (deltaTime = 0.05)
+                    pdata['x'] += normalized_dx * speed * 0.05
+                    pdata['y'] += normalized_dy * speed * 0.05
+                    
+                    # Velocity değerlerini güncelle (görsel için)
+                    pdata['vx'] = normalized_dx * speed
+                    pdata['vy'] = normalized_dy * speed
+                    
+                    # Rotasyonu güncelle
+                    pdata['rotation'] = math.atan2(dy, dx)
+                else:
+                    # Hedefe ulaştı, dur
+                    pdata['vx'] = 0
+                    pdata['vy'] = 0
+                
+                # Dünya sınırları
                 pdata['x'] = max(50, min(1950, pdata['x']))
                 pdata['y'] = max(50, min(1150, pdata['y']))
                 
-                # Velocity hesapla
-                pdata['vx'] = random.randint(-50, 50)
-                pdata['vy'] = random.randint(-50, 50)
+                # lastUpdate güncelle
+                pdata['lastUpdate'] = current_time
                 
-                # Rastgele rotasyon
-                pdata['rotation'] = math.atan2(pdata['vy'], pdata['vx'])
-                
-                # Botlar için de lastUpdate güncelle ki timeout olmasınlar
-                pdata['lastUpdate'] = datetime.now().timestamp()
-                
-                # 🔥 Her 2 tick'de bir pozisyon gönder (daha smooth hareket için)
-                # Veya pozisyon önemli ölçüde değiştiyse hemen gönder
-                position_changed = abs(old_x - pdata['x']) > 5 or abs(old_y - pdata['y']) > 5
-                
-                if self.game_state['tick'] % 2 == 0 or position_changed:
+                # Rastgele ateş etme (her 1-3 saniyede bir)
+                if current_time - pdata.get('lastShot', 0) > random.uniform(1, 3):
+                    pdata['lastShot'] = current_time
+                    # Rastgele bir yöne ateş et
+                    shoot_angle = random.uniform(0, math.pi * 2)
                     asyncio.create_task(self.broadcast({
-                        'type': 'PLAYER_UPDATE',
-                        'playerId': pdata['id'],
-                        'x': pdata['x'],
-                        'y': pdata['y'],
-                        'vx': pdata['vx'],
-                        'vy': pdata['vy'],
-                        'rotation': pdata['rotation']
+                        'type': 'PLAYER_SHOOT',
+                        'shooterId': pdata['id'],
+                        'x': pdata['x'] + math.cos(shoot_angle) * 30,
+                        'y': pdata['y'] + math.sin(shoot_angle) * 30,
+                        'rotation': shoot_angle,
+                        'timestamp': current_time
                     }))
+                
+                # Her tick pozisyon gönder (smooth hareket için)
+                asyncio.create_task(self.broadcast({
+                    'type': 'PLAYER_UPDATE',
+                    'playerId': pdata['id'],
+                    'x': pdata['x'],
+                    'y': pdata['y'],
+                    'vx': pdata['vx'],
+                    'vy': pdata['vy'],
+                    'rotation': pdata['rotation']
+                }))
 
     async def register_client(self, websocket):
         client_id = self.next_client_id
