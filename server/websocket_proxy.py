@@ -100,18 +100,19 @@ class GameServer:
                 
                 # En yakın oyuncuyu bul ve ona doğru ateş et
                 if current_time - pdata.get('lastShot', 0) > random.uniform(1, 3):
-                    # Canlı oyuncuları bul
-                    alive_players = [p for p in self.players.values() 
+                    # Sadece gerçek oyuncuları hedef al (botları değil)
+                    real_players = [p for p in self.players.values() 
                                    if p['id'] != pdata['id'] 
+                                   and not p.get('isBot', False)  # Bot olmayanlar
                                    and not p.get('isDead', False)
                                    and p['health'] > 0]
                     
-                    if alive_players:
-                        # En yakın oyuncuyu bul
+                    if real_players:
+                        # En yakın gerçek oyuncuyu bul
                         closest_player = None
                         min_distance = float('inf')
                         
-                        for target in alive_players:
+                        for target in real_players:
                             dist = math.sqrt((target['x'] - pdata['x'])**2 + 
                                            (target['y'] - pdata['y'])**2)
                             if dist < min_distance and dist < 500:  # 500 birim menzil
