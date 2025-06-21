@@ -457,6 +457,7 @@ class GameClient {
         
         if (victim) {
             victim.health = 0;
+            victim.isDead = true;  // 🔥 Ölü olarak işaretle
             this.createExplosion(victim.x, victim.y);
         }
         
@@ -482,6 +483,7 @@ class GameClient {
             player.x = data.x;
             player.y = data.y;
             player.health = data.health;
+            player.isDead = false;  // 🔥 Artık ölü değil
             
             // Respawn efekti
             for (let i = 0; i < 10; i++) {
@@ -501,8 +503,17 @@ class GameClient {
     }
 
     handleSync(data) {
-        // Server ile senkronizasyon
-        this.ping = Math.round((Date.now() - data.serverTime * 1000) / 2);
+        // Server ile senkronizasyon - daha doğru ping hesaplama
+        const now = Date.now();
+        const serverTime = data.serverTime * 1000; // Server timestamp'i millisaniye'ye çevir
+        
+        // Tek yönlü gecikme tahmini (daha doğru)
+        this.ping = Math.max(0, Math.round(now - serverTime));
+        
+        // Çok yüksek ping değerlerini sınırla
+        if (this.ping > 999) {
+            this.ping = 999;
+        }
     }
 
     update(deltaTime) {
@@ -676,6 +687,7 @@ class GameClient {
             // Check collisions with players
             this.players.forEach(player => {
                 if (player.id === projectile.shooterId) return;
+                if (player.isDead) return;  // 🔥 Ölü oyunculara mermi geçmez
 
                 const dist = Math.hypot(player.x - projectile.x, player.y - projectile.y);
                 if (dist < player.radius + projectile.radius) {
@@ -696,6 +708,9 @@ class GameClient {
     }
 
     handleHit(player, projectile) {
+        // 🔥 Ölü oyuncuya vurulamaz
+        if (player.isDead) return;
+        
         // Hit efekti
         this.createHitEffect(player.x, player.y);
         
@@ -911,6 +926,11 @@ class GameClient {
 
     drawPlayers() {
         this.players.forEach(player => {
+            // 🔥 Ölü oyuncuları yarı saydam çiz
+            if (player.isDead) {
+                this.ctx.globalAlpha = 0.3;
+            }
+            
             this.ctx.save();
             this.ctx.translate(player.x, player.y);
 
@@ -940,15 +960,18 @@ class GameClient {
             this.ctx.restore();
 
             // Health bar
-            if (player.health < player.maxHealth) {
+            if (player.health < player.maxHealth && !player.isDead) {
                 this.drawHealthBar(player);
             }
 
             // Name
-            this.ctx.fillStyle = 'white';
+            this.ctx.fillStyle = player.isDead ? 'rgba(255,255,255,0.5)' : 'white';
             this.ctx.font = 'bold 14px Orbitron';
             this.ctx.textAlign = 'center';
             this.ctx.fillText(player.name, player.x, player.y - 35);
+            
+            // 🔥 Alpha'yı resetle
+            this.ctx.globalAlpha = 1;
         });
     }
 
