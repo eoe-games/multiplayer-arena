@@ -323,10 +323,15 @@ class GameServer:
             victim = self.players[victim_id]
             shooter = self.players[shooter_id]
             
-            # 🔥 Eğer oyuncu zaten ölüyse hasar alma
+            # Eğer oyuncu zaten ölüyse hasar alma
             if victim.get('isDead', False):
                 return
             
+            # Botlar birbirine vurabilir (taktiksel özellik)
+            # Sadece bot kendine vuramaz
+            if victim_id == shooter_id:
+                return
+                
             # Hasar uygula
             victim['health'] = max(0, victim['health'] - damage)
             
