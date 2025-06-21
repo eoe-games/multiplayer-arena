@@ -346,18 +346,24 @@ class GameClient {
                         name: playerData.name,
                         radius: 20,
                         color: this.getRandomColor(),
-                        maxHealth: 100
+                        maxHealth: 100,
+                        x: playerData.x,
+                        y: playerData.y,
+                        targetX: playerData.x,
+                        targetY: playerData.y
                     };
                     this.players.set(playerData.id, player);
                 }
 
-                player.x = playerData.x;
-                player.y = playerData.y;
+                // Smooth update için target pozisyonları güncelle
+                player.targetX = playerData.x;
+                player.targetY = playerData.y;
                 player.vx = playerData.vx || 0;
                 player.vy = playerData.vy || 0;
                 player.rotation = playerData.rotation || 0;
                 player.health = playerData.health || 100;
                 player.score = playerData.score || 0;
+                player.isDead = playerData.isDead || false;
 
                 player.color = player.color || this.getRandomColor();
                 player.maxHealth = player.maxHealth || 100;
@@ -399,12 +405,18 @@ class GameClient {
     handlePlayerUpdate(data) {
         const player = this.players.get(data.playerId);
         if (player && data.playerId !== this.localPlayerId) {
-            // Diğer oyuncuların pozisyonlarını güncelle
-            player.x = data.x;
-            player.y = data.y;
+            // Smooth interpolation için hedef pozisyonları sakla
+            player.targetX = data.x;
+            player.targetY = data.y;
             player.vx = data.vx || 0;
             player.vy = data.vy || 0;
             player.rotation = data.rotation || 0;
+            
+            // Eğer ilk güncelleme ise direkt pozisyona atla
+            if (!player.hasOwnProperty('targetX')) {
+                player.x = data.x;
+                player.y = data.y;
+            }
         }
     }
 
@@ -526,6 +538,7 @@ class GameClient {
         this.updateCamera(deltaTime);
 
         // Update other entities
+        this.updateOtherPlayers(deltaTime);  // Yeni fonksiyon
         this.updateBots(deltaTime);
         this.updateProjectiles(deltaTime);
         this.updateParticles(deltaTime);
@@ -533,6 +546,27 @@ class GameClient {
 
         // Update UI
         this.updateUI();
+    }
+
+    updateOtherPlayers(deltaTime) {
+        // Diğer oyuncuları smooth interpolate et
+        this.players.forEach(player => {
+            if (player.id === this.localPlayerId || player.isBot) return;
+            
+            // Hedef pozisyona doğru interpolate et
+            if (player.targetX !== undefined && player.targetY !== undefined) {
+                const dx = player.targetX - player.x;
+                const dy = player.targetY - player.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distance > 1) {
+                    // Smooth interpolation
+                    const lerpFactor = 0.2; // Ne kadar hızlı interpolate edileceği
+                    player.x += dx * lerpFactor;
+                    player.y += dy * lerpFactor;
+                }
+            }
+        });
     }
 
     updateLocalPlayer(deltaTime) {
@@ -605,30 +639,34 @@ class GameClient {
     }
 
     updateBots(deltaTime) {
-        // Offline mode'da botları güncelle
-        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-            this.players.forEach(bot => {
-                if (!bot.isBot) return;
+        // Client tarafında botları interpolate et
+        this.players.forEach(bot => {
+            if (!bot.isBot || bot.isDead) return;
 
-                // Simple AI movement
-                const time = Date.now() * 0.001;
-                bot.vx = Math.sin(time + bot.id) * 100;
-                bot.vy = Math.cos(time + bot.id * 0.7) * 100;
-
-                bot.x += bot.vx * deltaTime;
-                bot.y += bot.vy * deltaTime;
-
-                // Bounds
-                bot.x = Math.max(50, Math.min(2000 - 50, bot.x));
-                bot.y = Math.max(50, Math.min(1200 - 50, bot.y));
-
-                // Random shooting
-                if (Math.random() < 0.01) {
-                    bot.rotation = Math.random() * Math.PI * 2;
-                    this.shoot(bot);
+            // Hedef pozisyona doğru smooth hareket
+            if (bot.targetX !== undefined && bot.targetY !== undefined) {
+                const dx = bot.targetX - bot.x;
+                const dy = bot.targetY - bot.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distance > 1) {
+                    // Velocity bazlı interpolation
+                    if (bot.vx !== 0 || bot.vy !== 0) {
+                        bot.x += bot.vx * deltaTime;
+                        bot.y += bot.vy * deltaTime;
+                    } else {
+                        // Fallback to lerp
+                        const lerpFactor = 0.15;
+                        bot.x += dx * lerpFactor;
+                        bot.y += dy * lerpFactor;
+                    }
                 }
-            });
-        }
+            }
+
+            // Bounds
+            bot.x = Math.max(50, Math.min(2000 - 50, bot.x));
+            bot.y = Math.max(50, Math.min(1200 - 50, bot.y));
+        });
     }
 
     shoot(shooter) {
