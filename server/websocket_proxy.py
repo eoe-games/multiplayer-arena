@@ -55,6 +55,9 @@ class GameServer:
             if pdata.get("isBot"):
                 # Eski bot hareketi - daha dinamik ve eğlenceli
                 time_factor = datetime.now().timestamp() * 0.5
+                old_x = pdata['x']
+                old_y = pdata['y']
+                
                 pdata['x'] += random.randint(-3, 3) + 2 * math.sin(time_factor + pdata['id'])
                 pdata['y'] += random.randint(-3, 3) + 2 * math.cos(time_factor + pdata['id'] * 0.7)
                 pdata['x'] = max(50, min(1950, pdata['x']))
@@ -70,8 +73,11 @@ class GameServer:
                 # Botlar için de lastUpdate güncelle ki timeout olmasınlar
                 pdata['lastUpdate'] = datetime.now().timestamp()
                 
-                # Her 5 tick'de bir pozisyon gönder
-                if self.game_state['tick'] % 5 == 0:
+                # 🔥 Her 2 tick'de bir pozisyon gönder (daha smooth hareket için)
+                # Veya pozisyon önemli ölçüde değiştiyse hemen gönder
+                position_changed = abs(old_x - pdata['x']) > 5 or abs(old_y - pdata['y']) > 5
+                
+                if self.game_state['tick'] % 2 == 0 or position_changed:
                     asyncio.create_task(self.broadcast({
                         'type': 'PLAYER_UPDATE',
                         'playerId': pdata['id'],
@@ -250,11 +256,16 @@ class GameServer:
             victim = self.players[victim_id]
             shooter = self.players[shooter_id]
             
+            # 🔥 Eğer oyuncu zaten ölüyse hasar alma
+            if victim.get('isDead', False):
+                return
+            
             # Hasar uygula
             victim['health'] = max(0, victim['health'] - damage)
             
             # Ölüm kontrolü
             if victim['health'] <= 0:
+                victim['isDead'] = True  # Ölü olarak işaretle
                 shooter['score'] += 1
                 
                 # Ölüm mesajı gönder
@@ -283,6 +294,7 @@ class GameServer:
         if player_id in self.players:
             player = self.players[player_id]
             player['health'] = 100
+            player['isDead'] = False  # Artık ölü değil
             player['x'] = random.randint(200, 1800)
             player['y'] = random.randint(200, 1000)
             
