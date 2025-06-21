@@ -29,7 +29,7 @@ class GameServer:
             "tick": 0,
             "serverTime": 0
         }
-        self.spawn_bots(3)  # başlangıçta 3 bot spawn
+        self.spawn_bots(10)  # başlangıçta 3 bot spawn
 
     def spawn_bots(self, count):
         for i in range(count):
